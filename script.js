@@ -1,200 +1,197 @@
-var processID = 0;
-var memControlBlockSize = 16;
-var processes = [];
+// Memory Management Simulator
+let processID = 0;
+const MEMORY_CONTROL_BLOCK_SIZE = 16;
+const MAX_MEMORY_SIZE = 1024; // Total memory size
+let processes = [];
 
-function Process(size, time) {
-    this.size = size;
-    this.timeLeft = time;
-    this.allocatedBlock = null;
-    this.id = processID++;
+// Process Class
+class Process {
+    constructor(size, time) {
+        this.id = processID++;
+        this.size = size;
+        this.timeLeft = time;
+        this.allocatedBlock = null;
+    }
+
+    tick() {
+        this.timeLeft--;
+    }
+
+    isAllocated() {
+        return this.allocatedBlock !== null;
+    }
 }
 
-Process.prototype.isAllocated = function () {
-    return this.allocatedBlock !== null;
-};
-
-Process.prototype.tick = function () {
-    this.timeLeft -= 1;
-};
-
-function MemControlBlock(size) {
-    this.size = size;
-    this.process = null;
-    this.available = true;
-    this.next = null;
-    this.prev = null;
-    this.fromPartition = false;
-}
-
-MemControlBlock.prototype.setProcess = function (process) {
-    if (process === null) {
+// Memory Block Class
+class MemoryBlock {
+    constructor(size) {
+        this.size = size;
         this.process = null;
         this.available = true;
-    } else {
-        this.process = process;
-        this.available = false;
+        this.next = null;
+        this.prev = null;
     }
-};
 
-function Heap() {
-    this.head = null;
-    this.size = 0;
-}
-
-Heap.prototype.requestAllocation = function (process) {
-    let blockBestFit = this.head;
-    while (blockBestFit && (blockBestFit.size < process.size || !blockBestFit.available)) {
-        blockBestFit = blockBestFit.next;
-    }
-    if (!blockBestFit) return false;
-    
-    let block = blockBestFit.next;
-    while (block) {
-        if (block.size >= process.size && block.available && block.size < blockBestFit.size) {
-            blockBestFit = block;
-        }
-        block = block.next;
-    }
-    
-    let spaceLeftover = blockBestFit.size - (process.size + memControlBlockSize);
-    if (spaceLeftover > 0) {
-        let newBlock = new MemControlBlock(spaceLeftover);
-        newBlock.next = blockBestFit.next;
-        if (newBlock.next) newBlock.next.prev = newBlock;
-        blockBestFit.next = newBlock;
-        newBlock.prev = blockBestFit;
-        blockBestFit.size = process.size;
-        newBlock.fromPartition = true;
-    }
-    
-    blockBestFit.setProcess(process);
-    process.allocatedBlock = blockBestFit;
-    return true;
-};
-
-Heap.prototype.deallocateProcess = function (process) {
-    if (process.allocatedBlock) {
-        process.allocatedBlock.setProcess(null);
-        process.allocatedBlock = null;
-    }
-};
-
-Heap.prototype.add = function (block) {
-    if (!this.head) {
-        this.head = block;
-    } else {
-        block.next = this.head;
-        this.head.prev = block;
-        this.head = block;
-    }
-    this.size += block.size;
-};
-
-Heap.prototype.repaint = function () {
-    let block = this.head;
-    let memoryDiv = document.getElementById("memory");
-    memoryDiv.innerHTML = "";
-    
-    while (block) {
-        let height = ((block.size / this.size) * 100);
-        if (block.fromPartition) height += (memControlBlockSize / this.size) * 100;
-        
-        let divBlock = document.createElement("div");
-        divBlock.style.height = height + "%";
-        divBlock.setAttribute("id", "block");
-        divBlock.className = block.available ? "available" : "unavailable";
-        memoryDiv.appendChild(divBlock);
-        
-        let blockLabel = document.createElement("div");
-        blockLabel.setAttribute("id", "blockLabel");
-        blockLabel.style.height = height + "%";
-        blockLabel.innerHTML = block.size + "K";
-        if (height <= 2) blockLabel.style.display = "none";
-        
-        divBlock.appendChild(blockLabel);
-        block = block.next;
-    }
-};
-
-function log(string) {
-    let logBox = document.getElementById("logBox");
-    logBox.innerHTML += string + "<br />";
-}
-
-function addProcessToTable(process) {
-    let row = document.createElement("tr");
-    row.setAttribute("id", "process" + process.id);
-    
-    let colName = document.createElement("td");
-    colName.innerHTML = process.id;
-    let colSize = document.createElement("td");
-    colSize.innerHTML = process.size;
-    let colTime = document.createElement("td");
-    colTime.setAttribute("id", "process" + process.id + "timeLeft");
-    colTime.innerHTML = process.timeLeft;
-    
-    row.appendChild(colName);
-    row.appendChild(colSize);
-    row.appendChild(colTime);
-    
-    document.getElementById("processTable").appendChild(row);
-}
-
-function removeProcessFromTable(process) {
-    let processRow = document.getElementById("process" + process.id);
-    if (processRow) {
-        processRow.parentNode.removeChild(processRow);
-    }
-}
-
-function refreshTable() {
-    for (let i = 0; i < processes.length; i++) {
-        let process = processes[i];
-        document.getElementById("process" + process.id + "timeLeft").innerHTML = process.timeLeft;
-    }
-}
-
-var heap = new Heap();
-var blockSizes = [256, 256, 256, 256];
-for (let i = 0; i < blockSizes.length; i++) {
-    heap.add(new MemControlBlock(blockSizes[i]));
-}
-heap.repaint();
-
-var clock = setInterval(function () {
-    for (let i = 0; i < processes.length; i++) {
-        let process = processes[i];
-        if (!process.isAllocated()) {
-            heap.requestAllocation(process);
+    allocate(process) {
+        if (process === null) {
+            this.process = null;
+            this.available = true;
         } else {
+            this.process = process;
+            this.available = false;
+        }
+    }
+}
+
+// Memory Manager
+class MemoryManager {
+    constructor(totalSize) {
+        this.totalSize = totalSize;
+        this.head = new MemoryBlock(totalSize);
+        this.memoryDiv = document.getElementById('memory');
+    }
+
+    allocate(process) {
+        let currentBlock = this.head;
+        
+        // Find first suitable block
+        while (currentBlock) {
+            if (currentBlock.available && currentBlock.size >= process.size) {
+                // Allocate the block
+                currentBlock.allocate(process);
+                process.allocatedBlock = currentBlock;
+
+                // Split block if significantly larger
+                if (currentBlock.size > process.size + MEMORY_CONTROL_BLOCK_SIZE) {
+                    const remainingBlock = new MemoryBlock(currentBlock.size - process.size);
+                    remainingBlock.next = currentBlock.next;
+                    currentBlock.next = remainingBlock;
+                    currentBlock.size = process.size;
+                }
+
+                this.updateMemoryVisualization();
+                return true;
+            }
+            currentBlock = currentBlock.next;
+        }
+
+        return false;
+    }
+
+    deallocate(process) {
+        if (process.allocatedBlock) {
+            process.allocatedBlock.allocate(null);
+            process.allocatedBlock = null;
+            this.mergeAdjacentFreeBlocks();
+            this.updateMemoryVisualization();
+        }
+    }
+
+    mergeAdjacentFreeBlocks() {
+        let currentBlock = this.head;
+        while (currentBlock && currentBlock.next) {
+            if (currentBlock.available && currentBlock.next.available) {
+                currentBlock.size += currentBlock.next.size;
+                currentBlock.next = currentBlock.next.next;
+            } else {
+                currentBlock = currentBlock.next;
+            }
+        }
+    }
+
+    updateMemoryVisualization() {
+        this.memoryDiv.innerHTML = '';
+        let currentBlock = this.head;
+        
+        while (currentBlock) {
+            const blockDiv = document.createElement('div');
+            blockDiv.style.height = `${(currentBlock.size / this.totalSize) * 100}%`;
+            blockDiv.classList.add('memory-block');
+            blockDiv.classList.add(currentBlock.available ? 'available' : 'unavailable');
+            
+            const blockLabel = document.createElement('div');
+            blockLabel.textContent = `${currentBlock.size}K`;
+            blockLabel.classList.add('block-label');
+            
+            blockDiv.appendChild(blockLabel);
+            this.memoryDiv.appendChild(blockDiv);
+            
+            currentBlock = currentBlock.next;
+        }
+    }
+}
+
+// Initialize Memory Manager
+const memoryManager = new MemoryManager(1024);
+
+// Simulation Clock
+const simulationClock = setInterval(() => {
+    for (let i = processes.length - 1; i >= 0; i--) {
+        const process = processes[i];
+        
+        if (!process.isAllocated()) {
+            // Try to allocate if not already allocated
+            memoryManager.allocate(process);
+        } else {
+            // Tick down process time
             process.tick();
-            if (process.timeLeft < 1) {
-                heap.deallocateProcess(process);
-                processes.splice(i, 1);
+            
+            // Remove process if time is up
+            if (process.timeLeft <= 0) {
+                memoryManager.deallocate(process);
                 removeProcessFromTable(process);
-                refreshTable();
-                heap.repaint();
+                processes.splice(i, 1);
+                updateProcessTable();
             }
         }
     }
 }, 1000);
 
-document.getElementById("processForm").onsubmit = function () {
-    let elements = this.elements;
-    let inProcessSize = elements.namedItem("processSize");
-    let inProcessTime = elements.namedItem("processTime");
+// Add Process Form Handling
+document.getElementById('processForm').addEventListener('submit', (event) => {
+    event.preventDefault();
     
-    let process = new Process(parseInt(inProcessSize.value), parseInt(inProcessTime.value));
-    heap.requestAllocation(process);
-    heap.repaint();
+    const sizeInput = event.target.elements.processSize;
+    const timeInput = event.target.elements.processTime;
+    
+    const size = parseInt(sizeInput.value);
+    const time = parseInt(timeInput.value);
+    
+    const process = new Process(size, time);
     processes.push(process);
+    
     addProcessToTable(process);
     
-    log("Requesting: " + process.size);
-    log(heap.toString() + "<br>");
+    // Reset form
+    sizeInput.value = '';
+    timeInput.value = '';
+});
+
+function addProcessToTable(process) {
+    const tableBody = document.querySelector('#processTable tbody');
+    const row = document.createElement('tr');
+    row.id = `process-${process.id}`;
     
-    inProcessSize.value = "";
-    inProcessTime.value = "";
+    row.innerHTML = `
+        <td>${process.id}</td>
+        <td>${process.size}K</td>
+        <td>${process.timeLeft}</td>
+    `;
     
-    return false;
-};
+    tableBody.appendChild(row);
+}
+
+function removeProcessFromTable(process) {
+    const row = document.getElementById(`process-${process.id}`);
+    if (row) row.remove();
+}
+
+function updateProcessTable() {
+    const tableBody = document.querySelector('#processTable tbody');
+    tableBody.innerHTML = '';
+    
+    processes.forEach(addProcessToTable);
+}
+
+// Initial memory visualization
+memoryManager.updateMemoryVisualization();
